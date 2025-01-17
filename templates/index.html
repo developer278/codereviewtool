@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Review Tool</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <style>
+        @keyframes float {
+            0% { transform: translateY(0px); }
+            50% { transform: translateY(-10px); }
+            100% { transform: translateY(0px); }
+        }
+
+        @keyframes scale {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+            100% { transform: scale(1); }
+        }
+
+        @keyframes rotate {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        .floating {
+            animation: float 3s ease-in-out infinite;
+        }
+
+        .scaling {
+            animation: scale 2s ease-in-out infinite;
+        }
+
+        .rotating {
+            animation: rotate 20s linear infinite;
+        }
+
+        .stage {
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .stage::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(45deg, rgba(255,255,255,0.2) 25%, transparent 25%, transparent 50%, rgba(255,255,255,0.2) 50%, rgba(255,255,255,0.2) 75%, transparent 75%, transparent);
+            background-size: 30px 30px;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+
+        .stage-active {
+            background-color: #4CAF50;
+            color: white;
+            transform: scale(1.05);
+        }
+
+        .upload-zone {
+            border: 3px dashed #e2e8f0;
+            transition: all 0.3s ease;
+            background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+        }
+
+        .upload-zone.drag-over {
+            border-color: #4CAF50;
+            background: linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%);
+            transform: scale(1.02);
+        }
+
+        .score-card {
+            background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+            transition: all 0.3s ease;
+        }
+
+        .score-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+        }
+
+        .score-circle {
+            width: 120px;
+            height: 120px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2.5rem;
+            font-weight: bold;
+            background: conic-gradient(from 0deg, #4CAF50 var(--progress), #e2e8f0 var(--progress));
+            position: relative;
+            transition: all 0.5s ease;
+        }
+
+        .score-circle::before {
+            content: '';
+            position: absolute;
+            width: 110px;
+            height: 110px;
+            border-radius: 50%;
+            background: white;
+        }
+
+        .score-value {
+            position: relative;
+            z-index: 1;
+        }
+
+        .confetti {
+            position: fixed;
+            width: 10px;
+            height: 10px;
+            background-color: #f00;
+            animation: confetti-fall 3s linear infinite;
+        }
+
+        @keyframes confetti-fall {
+            0% { transform: translateY(-100vh) rotate(0deg); }
+            100% { transform: translateY(100vh) rotate(360deg); }
+        }
+
+        .issue-list {
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .issue-item {
+            transition: all 0.3s ease;
+        }
+
+        .issue-item:hover {
+            transform: translateX(10px);
+        }
+
+        .score-circle-container {
+            width: 120px;
+            height: 120px;
+            position: relative;
+        }
+
+        .score-circle-bg {
+            stroke-dasharray: 339.292;
+            stroke-dashoffset: 0;
+        }
+
+        .score-circle-progress {
+            stroke-dasharray: 339.292;
+            stroke-dashoffset: 339.292;
+            transition: stroke-dashoffset 1s ease-in-out;
+        }
+
+        .suggestion-card {
+            border-left: 4px solid;
+            transition: all 0.3s ease;
+        }
+
+        .suggestion-card:hover {
+            transform: translateX(10px);
+        }
+
+        .suggestion-card.performance { border-color: #2196F3; }
+        .suggestion-card.maintainability { border-color: #FF9800; }
+        .suggestion-card.style { border-color: #9C27B0; }
+        .suggestion-card.security { border-color: #F44336; }
+
+        .suggestion-count {
+            min-width: 24px;
+            height: 24px;
+            border-radius: 12px;
+            background-color: #e2e8f0;
+            color: #4a5568;
+            font-size: 0.875rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .suggestion-issues {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease-out;
+        }
+
+        .suggestion-issues.expanded {
+            max-height: 500px;
+        }
+
+        /* Add new animations */
+        @keyframes pulse-glow {
+            0% { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.4); }
+            70% { box-shadow: 0 0 0 10px rgba(74, 222, 128, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0); }
+        }
+
+        .analyze-btn {
+            animation: pulse-glow 2s infinite;
+            transition: all 0.3s ease;
+        }
+
+        .analyze-btn:hover {
+            transform: scale(1.05);
+            animation: none;
+        }
+
+        .analyze-btn:active {
+            transform: scale(0.95);
+        }
+
+        .new-analysis-top {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 100;
+            opacity: 0;
+            transform: translateY(-20px);
+            transition: all 0.3s ease;
+            pointer-events: none;
+        }
+
+        .new-analysis-top.visible {
+            opacity: 1;
+            transform: translateY(0);
+            pointer-events: auto;
+        }
+
+        .results-container {
+            transition: all 0.5s ease;
+            opacity: 0;
+            transform: translateY(20px);
+        }
+
+        .results-container.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-blue-50 to-purple-50 min-h-screen">
+    <div class="container mx-auto px-4 py-8 max-w-4xl">
+        <!-- New Analysis Button (Top) -->
+        <button id="new-analysis-top" class="new-analysis-top bg-gradient-to-r from-blue-500 to-purple-500 text-white px-6 py-3 rounded-lg hover:from-blue-600 hover:to-purple-600 transition-all duration-300 transform hover:scale-105 shadow-lg">
+            <span class="flex items-center">
+                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                </svg>
+                New Analysis
+            </span>
+        </button>
+
+        <div class="bg-white rounded-xl shadow-2xl p-8">
+            <div class="text-center mb-8">
+                <h1 class="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 text-transparent bg-clip-text">
+                    Code Review Tool
+                </h1>
+                <p class="text-gray-600 mt-2">Let's make your code shine! ✨</p>
+            </div>
+
+            <!-- Progress Stages -->
+            <div class="flex justify-between mb-8">
+                <div id="stage-upload" class="stage flex-1 text-center p-4 rounded-lg mx-2 bg-gray-100">
+                    <div class="text-lg font-semibold flex items-center justify-center">
+                        <span class="mr-2">📤</span> Upload
+                    </div>
+                </div>
+                <div id="stage-analyzing" class="stage flex-1 text-center p-4 rounded-lg mx-2 bg-gray-100">
+                    <div class="text-lg font-semibold flex items-center justify-center">
+                        <span class="mr-2">🔍</span> Analyzing
+                    </div>
+                </div>
+                <div id="stage-complete" class="stage flex-1 text-center p-4 rounded-lg mx-2 bg-gray-100">
+                    <div class="text-lg font-semibold flex items-center justify-center">
+                        <span class="mr-2">🎉</span> Complete
+                    </div>
+                </div>
+            </div>
+
+            <!-- Status Message -->
+            <div id="status-message" class="text-center mb-6 text-lg font-medium text-gray-600"></div>
+
+            <!-- Upload Form -->
+            <div id="upload-form" class="mb-8">
+                <form id="code-form" class="space-y-4">
+                    <div id="upload-zone" class="upload-zone rounded-xl p-8">
+                        <div class="flex flex-col items-center">
+                            <input type="file" name="file" accept=".py,.php,.html,.js,.css" class="hidden" id="file-input">
+                            <div class="floating mb-4">
+                                <svg class="w-16 h-16 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
+                                </svg>
+                            </div>
+                            <label for="file-input" class="cursor-pointer bg-gradient-to-r from-blue-500 to-purple-500 text-white px-6 py-3 rounded-lg hover:from-blue-600 hover:to-purple-600 transition-all duration-300 transform hover:scale-105">
+                                Choose File
+                            </label>
+                            <p class="mt-4 text-gray-500">Drag & drop your file here or click to browse</p>
+                            <div class="mt-2 flex items-center">
+                                <p id="file-name" class="text-gray-600 mr-2"></p>
+                                <span id="file-type-badge" class="hidden px-3 py-1 rounded-full text-sm font-semibold"></span>
+                            </div>
+                        </div>
+                    </div>
+                    <button type="submit" class="analyze-btn w-full bg-gradient-to-r from-green-500 to-emerald-500 text-white px-6 py-3 rounded-lg hover:from-green-600 hover:to-emerald-600 transition-all duration-300">
+                        <span class="flex items-center justify-center">
+                            <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                            </svg>
+                            Analyze Code
+                        </span>
+                    </button>
+                </form>
+            </div>
+
+            <!-- Results Section -->
+            <div id="results-section" class="results-container hidden">
+                <!-- Score Card -->
+                <div class="score-card rounded-xl p-6 mb-6">
+                    <div class="flex items-center justify-between">
+                        <div class="flex-1">
+                            <div class="flex items-center gap-2 mb-2">
+                                <span id="score-emoji" class="text-3xl"></span>
+                                <h2 id="score-title" class="text-2xl font-bold"></h2>
+                            </div>
+                            <p id="score-message" class="text-gray-600"></p>
+                        </div>
+                        <div class="score-circle-container relative">
+                            <div class="score-circle">
+                                <span class="score-value"></span>
+                            </div>
+                            <svg class="absolute inset-0 -rotate-90">
+                                <circle class="score-circle-bg" cx="60" cy="60" r="54" stroke="#e2e8f0" stroke-width="6" fill="none"/>
+                                <circle class="score-circle-progress" cx="60" cy="60" r="54" stroke="#4CAF50" stroke-width="6" fill="none"/>
+                            </svg>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Improvement Suggestions -->
+                <div class="bg-white rounded-xl p-6 mb-6">
+                    <h3 class="text-xl font-bold mb-4">Improvement Areas</h3>
+                    <div id="suggestions-list" class="space-y-4">
+                        <!-- Suggestions will be populated here -->
+                    </div>
+                </div>
+
+                <!-- Issues List -->
+                <div class="bg-white rounded-xl p-6 mb-6">
+                    <h3 class="text-xl font-bold mb-4">Top Issues to Address</h3>
+                    <div id="issues-list" class="issue-list space-y-2">
+                        <!-- Issues will be populated here -->
+                    </div>
+                </div>
+
+                <!-- Analysis Details -->
+                <div class="bg-white rounded-xl p-6 mb-6">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-xl font-bold">Detailed Analysis</h3>
+                        <span id="result-file-type-badge" class="px-3 py-1 rounded-full text-sm font-semibold"></span>
+                    </div>
+                    <div id="file-info" class="mb-4 text-gray-600"></div>
+                    <div id="analysis-result" class="font-mono text-sm bg-gray-50 p-4 rounded-lg overflow-x-auto"></div>
+                </div>
+
+                <button id="new-analysis" class="w-full bg-gradient-to-r from-blue-500 to-purple-500 text-white px-6 py-3 rounded-lg hover:from-blue-600 hover:to-purple-600 transition-all duration-300 transform hover:scale-105">
+                    <span class="flex items-center">
+                        <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                        </svg>
+                        New Analysis
+                    </span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        const form = document.getElementById('code-form');
+        const fileInput = document.getElementById('file-input');
+        const fileName = document.getElementById('file-name');
+        const fileTypeBadge = document.getElementById('file-type-badge');
+        const resultFileTypeBadge = document.getElementById('result-file-type-badge');
+        const uploadForm = document.getElementById('upload-form');
+        const resultsSection = document.getElementById('results-section');
+        const statusMessage = document.getElementById('status-message');
+        const fileInfo = document.getElementById('file-info');
+        const analysisResult = document.getElementById('analysis-result');
+        const uploadZone = document.getElementById('upload-zone');
+        const stages = ['upload', 'analyzing', 'complete'];
+
+        function createConfetti() {
+            const colors = ['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff', '#00ffff'];
+            for (let i = 0; i < 50; i++) {
+                const confetti = document.createElement('div');
+                confetti.className = 'confetti';
+                confetti.style.left = Math.random() * 100 + 'vw';
+                confetti.style.backgroundColor = colors[Math.floor(Math.random() * colors.length)];
+                confetti.style.animationDelay = Math.random() * 3 + 's';
+                document.body.appendChild(confetti);
+                setTimeout(() => confetti.remove(), 3000);
+            }
+        }
+
+        function updateStage(currentStage) {
+            stages.forEach(stage => {
+                const element = document.getElementById(`stage-${stage}`);
+                if (stages.indexOf(stage) <= stages.indexOf(currentStage)) {
+                    element.classList.add('stage-active');
+                } else {
+                    element.classList.remove('stage-active');
+                }
+            });
+        }
+
+        function updateFileTypeBadge(badge, fileType) {
+            if (!fileType) {
+                badge.classList.add('hidden');
+                return;
+            }
+            
+            const colors = {
+                py: 'bg-blue-500',
+                php: 'bg-purple-500',
+                html: 'bg-red-500',
+                js: 'bg-yellow-500 text-black',
+                css: 'bg-pink-500'
+            };
+            
+            badge.textContent = fileType.toUpperCase();
+            badge.className = `px-3 py-1 rounded-full text-sm font-semibold ${colors[fileType] || 'bg-gray-500'}`;
+            badge.classList.remove('hidden');
+        }
+
+        function updateScoreCard(quality) {
+            const scoreCircle = document.querySelector('.score-circle-progress');
+            const scoreValue = document.querySelector('.score-value');
+            const scoreTitle = document.getElementById('score-title');
+            const scoreMessage = document.getElementById('score-message');
+            const scoreEmoji = document.getElementById('score-emoji');
+            const suggestionsList = document.getElementById('suggestions-list');
+            const issuesList = document.getElementById('issues-list');
+
+            // Update score and messages
+            scoreValue.textContent = quality.score;
+            scoreTitle.textContent = quality.title;
+            scoreMessage.textContent = quality.message;
+            scoreEmoji.textContent = quality.emoji;
+
+            // Update circular progress
+            const circumference = 2 * Math.PI * 54;
+            const offset = circumference - (quality.score / 10) * circumference;
+            scoreCircle.style.strokeDashoffset = offset;
+
+            // Update suggestions
+            suggestionsList.innerHTML = quality.suggestions.map(suggestion => `
+                <div class="suggestion-card ${suggestion.category.toLowerCase().split(' ')[1]} bg-gray-50 p-4 rounded-lg">
+                    <div class="flex items-center justify-between cursor-pointer" onclick="toggleSuggestion(this)">
+                        <div class="flex items-center gap-2">
+                            <span>${suggestion.category}</span>
+                            <span class="suggestion-count">${suggestion.count}</span>
+                        </div>
+                        <svg class="w-5 h-5 transform transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                        </svg>
+                    </div>
+                    <div class="suggestion-issues mt-2">
+                        <ul class="space-y-2 text-gray-600">
+                            ${suggestion.issues.map(issue => `
+                                <li class="flex items-start gap-2">
+                                    <span class="text-gray-400">•</span>
+                                    <span>${issue}</span>
+                                </li>
+                            `).join('')}
+                        </ul>
+                    </div>
+                </div>
+            `).join('');
+
+            // Update issues list
+            issuesList.innerHTML = quality.issues.map(issue => `
+                <div class="issue-item p-3 bg-gray-50 rounded-lg hover:bg-gray-100">
+                    <p class="text-gray-700">${issue}</p>
+                </div>
+            `).join('');
+
+            // Show confetti for high scores
+            if (quality.score >= 9) {
+                createConfetti();
+            }
+        }
+
+        function toggleSuggestion(element) {
+            const issuesDiv = element.parentElement.querySelector('.suggestion-issues');
+            const arrow = element.querySelector('svg');
+            issuesDiv.classList.toggle('expanded');
+            arrow.style.transform = issuesDiv.classList.contains('expanded') ? 'rotate(180deg)' : '';
+        }
+
+        function showResults() {
+            uploadForm.classList.add('hidden');
+            resultsSection.classList.remove('hidden');
+            document.getElementById('new-analysis-top').classList.add('visible');
+            
+            // Add visible class after a small delay to trigger animation
+            setTimeout(() => {
+                resultsSection.classList.add('visible');
+            }, 100);
+        }
+
+        function resetAnalysis() {
+            uploadForm.classList.remove('hidden');
+            resultsSection.classList.remove('visible');
+            document.getElementById('new-analysis-top').classList.remove('visible');
+            
+            // Hide results after animation
+            setTimeout(() => {
+                resultsSection.classList.add('hidden');
+            }, 500);
+            
+            stages.forEach(stage => {
+                document.getElementById(`stage-${stage}`).classList.remove('stage-active');
+            });
+            statusMessage.textContent = '';
+            form.reset();
+            fileName.textContent = '';
+            fileTypeBadge.classList.add('hidden');
+        }
+
+        // Drag and drop handling
+        uploadZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadZone.classList.add('drag-over');
+        });
+
+        uploadZone.addEventListener('dragleave', () => {
+            uploadZone.classList.remove('drag-over');
+        });
+
+        uploadZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadZone.classList.remove('drag-over');
+            
+            if (e.dataTransfer.files.length) {
+                fileInput.files = e.dataTransfer.files;
+                const file = e.dataTransfer.files[0];
+                fileName.textContent = file.name;
+                const fileType = file.name.split('.').pop().toLowerCase();
+                updateFileTypeBadge(fileTypeBadge, fileType);
+            }
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                const file = e.target.files[0];
+                fileName.textContent = file.name;
+                const fileType = file.name.split('.').pop().toLowerCase();
+                updateFileTypeBadge(fileTypeBadge, fileType);
+            }
+        });
+
+        document.getElementById('new-analysis').addEventListener('click', resetAnalysis);
+        document.getElementById('new-analysis-top').addEventListener('click', resetAnalysis);
+
+        socket.on('status_update', (data) => {
+            statusMessage.textContent = data.message;
+            updateStage(data.stage);
+            
+            if (data.stage === 'complete') {
+                showResults();
+                fileInfo.textContent = `Analyzed file: ${fileName.textContent}`;
+                analysisResult.textContent = data.result;
+                updateFileTypeBadge(resultFileTypeBadge, data.fileType);
+                updateScoreCard(data.quality);
+            }
+        });
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const formData = new FormData(form);
+            
+            if (!fileInput.files.length) {
+                statusMessage.textContent = 'Please select a file';
+                return;
+            }
+
+            try {
+                const response = await fetch('/analyze', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                if (result.status === 'error') {
+                    statusMessage.textContent = result.message;
+                }
+            } catch (error) {
+                statusMessage.textContent = 'An error occurred during analysis';
+                console.error('Error:', error);
+            }
+        });
+    </script>
+</body>
+</html>
